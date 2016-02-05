@@ -1,0 +1,118 @@
+---
+title: "Practical Machine Learning Course Project Report"
+author: "Paulo Oliveira"
+date: "February 2016"
+output:
+  html_document:
+    toc: yes
+---
+
+```{r echo = F, message = F}
+# Load the required libraries
+library(caret)
+library(randomForest)
+```
+### Abstract
+This assignment is part of the *Practical Machine Learning* class project in the Coursera data Science Specialization.
+The goal of this project is to analyze an exercise measurements dataset, and then predict quality of exercise based on associated predictor variables. In this report, we first show how the data was loaded and cleaned-up (pre-processing). A prediction model was built on the *training* set and the performance estimated through cross-validation.
+
+### Load and Pre-process the Data 
+We start by loading the training and testing datasets into dataframes:          
+
+```{r loadingdata, results="hide"}
+setwd("~/Data Science Specialization/Practical Machine Learning/Project")
+# Many fields have no values or #DIV/0 wich we will consider to be NA strings:
+training <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!"))
+testing <- read.csv("pml-testing.csv" , na.strings = c("NA", "#DIV/0!"))
+summary(training)
+```
+
+We now remove the 'user_name' and 'X' (row index) columns. These variables should not be used for a model intended to predict on any generic user.
+
+```{r clean1}
+# remove: 
+# user_name - not a predictor we can generally use
+# X - row index 
+training <- subset(training, select = -c(X, user_name))
+testing <- subset(testing, select = -c(X, user_name))
+```
+
+There are also columns that contain time/window information which should not contribute to the prediction model as the authors state these are 'sliding windows' thus uncorrelated with the classe.
+
+```{r clean2}
+# remove time/window columns before building model
+training <- subset(training, select = -c(new_window, num_window, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp))
+testing <- subset(testing, select = -c(new_window, num_window, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp))
+```
+
+By running summary() on the training dataset (result not listed here for brevity), we find that many of the columns (variables) contain very few values (mostly NAs). We therefore remove the columns where more than 90% of the values are missing:
+
+```{r clean3}
+# Find columns with mostly NAs and remove them
+trow = nrow(training)
+colrm = apply(training, 2, function(x) sum(is.na(x))/trow > 0.9 )
+training = subset(training, select = !colrm)
+testing = subset(testing, select = !colrm)
+```
+
+This leaves us with 53 variables to use in our model which is a more manageable number.
+
+### Create a Prediction Model 
+To determine what type of model to use, it is often useful to examine how the variables correlate with the outcome ('classe' in this case). If there are highly correlated variables with 'classe', then a linear model may be adequate. If not, then we choose a non-linear boosting or random forests algorithm instead.
+
+```{r correlations}
+# calculate correlations
+preds <- names(training)[-length(names(training))] # all but 'classe'
+cor <- abs(sapply(preds, function(x) cor(as.numeric(training[, x]), as.numeric(training$classe))))
+summary(cor)
+```
+
+We have not found any  predictors that correlate with `classe` very strongly (maximum was 0.344), so a linear regression model is not likely to be a good choice here. We will try boosting and random forests instead.  
+
+#### Random Forest   
+We start by fitting a model with random forests algorithm and 10-fold cross validation to predict `classe` from all other predictors.    
+
+```{r randomforest1}
+set.seed(322)
+mod_rf <- train(classe ~ ., method = "rf", data = training, 
+                 importance = T, 
+                 trControl = trainControl(method = "cv", number = 10))
+mod_rf
+plot(mod_rf)
+```
+
+The random forest model performed very well in-sample, with about 99.5% Accuracy. 
+
+#### Boosting
+Similarly to what we did with random forests, we now fit a model using the boosting algorithm and 10-fold cross validation to predict `classe` from all other predictors.    
+
+```{r boosting1}
+set.seed(322)
+mod_boost <- train(classe ~ ., method = "gbm", data = training,
+                    verbose = F,
+                    trControl = trainControl(method = "cv", number = 10))
+mod_boost
+plot(mod_boost)
+```
+
+The boosting model performs well with a 96.5% Accuracy in-sample, though not as well as the Random Forest model.
+
+### Final model and prediction 
+If we had to choose a single model at this stage, we would go with the Random Forest model as it performed slightly better.
+
+```{r}
+mod_rf$finalModel
+```
+The OOB (out of bag), out of sample error estimate for mod_rf (from cross-validation) is only 0.43% which is very good.
+ 
+Finally, we can now look at the predictions in the testing dataset. In this case, both models yield the same predictions:
+```{r predicting, message = F, warning = F}
+predict(mod_rf, testing)
+predict(mod_boost, testing)
+```
+
+We will use these predictions to submit to the project quiz.
+
+#### Platform Information
+- R version 3.2.3 (2015-12-10). nickname 'Wooden Christmas-Tree'
+- Platform: x86_64-w64-mingw32/x64 (64-bit)
